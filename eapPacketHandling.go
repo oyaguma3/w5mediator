@@ -16,25 +16,23 @@ func encodeEapPacketChallenge(akaFlag byte, ki, opc, rand, sqn, amf, kAut []byte
 	slog.Debug("[EAP-Server] AKA-Challenge construction /", "process", "start")
 	var timeStamp int64
 	eapPk := []byte{}
-	// milenageパッケージの引数sqnはuint64型、引数amfはuint16型のため、適切に変換する。
+	// Type of argument "SQN"/"AMF" in "milenage" package is uint64/uint16, it needs to change from byte slice to these type.
 	sqnByte := make([]byte, 8)
 	_ = copy(sqnByte[2:8], sqn)
 	sqn64 := binary.BigEndian.Uint64(sqnByte)
 	amf16 := binary.BigEndian.Uint16(amf)
-	// milenageパッケージの引数がここで全て揃うので、ComputeAll実施。
 	mil := milenage.NewWithOPc(ki, opc, rand, sqn64, amf16)
 	comPuteErr := mil.ComputeAll()
 	if comPuteErr != nil {
 		slog.Error("[EAP-Server] milenage computeAll for EAP packet failed /", "error", comPuteErr)
 		return eapPk, timeStamp, comPuteErr
 	}
-	// ComputeAll実行したのでAUTN生成を実施。
 	autnData, autnGenErr := mil.GenerateAUTN()
 	if autnGenErr != nil {
 		slog.Error("[EAP-Server] milenage generate AUTN data for EAP packet failed /", "error", autnGenErr)
 		return eapPk, timeStamp, autnGenErr
 	}
-	// AT_xxx導出処理開始
+	// Start derivation process of "AT_xxx".
 	atRand := make([]byte, 20)
 	_ = copy(atRand[0:4], []byte{0x01, 0x05, 0x00, 0x00})
 	_ = copy(atRand[4:20], rand)
@@ -45,11 +43,9 @@ func encodeEapPacketChallenge(akaFlag byte, ki, opc, rand, sqn, amf, kAut []byte
 	slog.Debug("[EAP-Server] generate /", "AT_AUTN", fmt.Sprintf("0x%X", atAutn))
 	atMac := make([]byte, 20)
 	_ = copy(atMac[0:4], []byte{0x0B, 0x05, 0x00, 0x00})
-	// EAP-AKAかEAP-AKA'でAT_MACの導出方法とAT_KDF/AT_KDF_INPUT有無が異なるため、ケース分割する。
+	// Case divided by EAP-AKA(23) and EAP-AKA'(50) due to difference of AT_MAC derivation and presence of AT_KDF/AT_KDF_INPUT.
 	switch akaFlag {
 	case 23:
-		// 一旦、AT_RAND/AUTN/MAC(00パディング)が揃っているため、この3つを入れてEAP-Request/AKA-ChallengeのEAPパケットに加工する。
-		// AT_MAC算出には正しいEAP-IDも必要なので、このタイミングでEAP-IDを生成しておく。
 		eapPktTemp := make([]byte, 68)
 		genId := generateEAPId()
 		t := time.Now()
@@ -58,25 +54,22 @@ func encodeEapPacketChallenge(akaFlag byte, ki, opc, rand, sqn, amf, kAut []byte
 		_ = copy(eapPktTemp[8:28], atRand)
 		_ = copy(eapPktTemp[28:48], atAutn)
 		_ = copy(eapPktTemp[48:68], atMac)
-		// 計算用EAPパケット完成したのでAT_MACを算出し、上書きする。
 		atMacData := calculateAtMACdataForAka(kAut, eapPktTemp)
 		_ = copy(atMac[4:20], atMacData)
 		_ = copy(eapPktTemp[48:68], atMac)
 		slog.Debug("[EAP-Server] generate /", "AT_MAC", fmt.Sprintf("0x%X", atMac))
 		eapPk = eapPktTemp
 	case 50:
-		// AT_KDF生成（固定値）
+		// AT_KDF generation
 		atKdf := []byte{0x18, 0x01, 0x00, 0x01}
 		slog.Debug("[EAP-Server] generate /", "AT_KDF", fmt.Sprintf("0x%X", atKdf))
-		// AT_KDF_INPUT生成
+		// AT_KDF_INPUT generation
 		atKdfInput, err := generateAtKdfInput(conf.atKDFInput)
 		if err != nil {
 			slog.Error("[EAP-Server] generate failure / AT_KDF_INPUT /", "error", err)
 			return eapPk, timeStamp, err
 		}
 		slog.Debug("[EAP-Server] generate /", "AT_KDF_INPUT", fmt.Sprintf("0x%X", atKdfInput))
-		// AT_xxx系が出揃ったのでEAP-Request/AKA-ChallengeのEAPパケットに加工する。
-		// AT_MAC算出には正しいEAP-IDも必要なので、このタイミングでEAP-IDを生成しておく。
 		eapPktLen := len(atKdfInput) + 72
 		lenUintOneSix := intToByteArray(eapPktLen)
 		eapPktTemp := make([]byte, eapPktLen)
@@ -90,7 +83,6 @@ func encodeEapPacketChallenge(akaFlag byte, ki, opc, rand, sqn, amf, kAut []byte
 		_ = copy(eapPktTemp[68:72], atKdf)
 		_ = copy(eapPktTemp[72:eapPktLen], atKdfInput)
 		atMacData := calculateAtMACdataForAkaP(kAut, eapPktTemp)
-		// 計算用EAPパケット完成したのでAT_MACを算出し、上書きする。
 		_ = copy(atMac[4:20], atMacData)
 		_ = copy(eapPktTemp[48:68], atMac)
 		slog.Debug("[EAP-Server] generate /", "AT_MAC", fmt.Sprintf("0x%X", atMac))
@@ -103,7 +95,6 @@ func encodeEapPacketChallenge(akaFlag byte, ki, opc, rand, sqn, amf, kAut []byte
 	return eapPk, timeStamp, nil
 }
 
-// AT_KDF_INPUT生成用関数
 func generateAtKdfInput(nwName string) ([]byte, error) {
 	nameLen := len(nwName)
 	if nameLen == 0 {
@@ -122,15 +113,12 @@ func generateAtKdfInput(nwName string) ([]byte, error) {
 	return atKdfInput, nil
 }
 
-// intをByteスライス2要素に変換する。free5GCソースコードより一部引用。
 func intToByteArray(i int) []byte {
 	r := make([]byte, 2)
 	binary.BigEndian.PutUint16(r, uint16(i))
 	return r
 }
 
-// EAP-AKA'用のAT_MACを導出する。free5GCのausfソースコードより一部引用。
-// K_autをkeyとして、計算対象のEAPパケットをinputとして、それぞれ引数に取る。
 func calculateAtMACdataForAkaP(kAut []byte, input []byte) []byte {
 	h := hmac.New(sha256.New, kAut)
 	if _, err := h.Write(input); err != nil {
@@ -140,8 +128,6 @@ func calculateAtMACdataForAkaP(kAut []byte, input []byte) []byte {
 	return sum[:16]
 }
 
-// EAP-AKA用のAT_MACを導出する。free5GCのausfソースコードより一部引用してSHA1に変更。
-// K_autをkeyとして、計算対象のEAPパケットをinputとして、それぞれ引数に取る。
 func calculateAtMACdataForAka(kAut []byte, input []byte) []byte {
 	h := hmac.New(sha1.New, kAut)
 	if _, err := h.Write(input); err != nil {
@@ -151,13 +137,12 @@ func calculateAtMACdataForAka(kAut []byte, input []byte) []byte {
 	return sum[:16]
 }
 
-// 引数に取ったEAP TypeDataに含まれる「AT_xxxのデータ部分」を返す（つまりTypeやLengthは含まれていない）
-// ただし、想定しているのは EAP-Response/AKA-Challenge または EAP-Response/AKA-Synchronization-Failure のケースのみ。
-// よって、AT_RES、AT_AUTS、AT_MAC、AT_CHCEKCODE、(AT_KD)Fの5つを返す。含まれていない場合はnilスライスのまま返ってくる。
+// This function returns Value part of "AT_xxx" in TypeData of EAP Packet. (it means that no Type and Length included)
+// And it is in case of "EAP-Response/AKA-Challenge" or "EAP-Response/AKA-Synchronization-Failure", so AT_RES, AT_AUTS, AT_MAC, AT_CHCEKCODE, AT_KDF return if they are included.
+// if no included, it returns nil slice.
 func decodeEapTypeData(typeData []byte) (atResData, atMacData, atCheckcodeData, atAutsData []byte, err error) {
 	slog.Debug("[EAP-Server] AKA-Challenge or AKA-Synch-Fail decode /", "process", "start")
 	var data []byte
-	// typeData[0]を見て、AKA-Challenge/AKA-Synchronization-Failureであるか確認。
 	switch typeData[0] {
 	case 0x01:
 		slog.Debug("[EAP-Server] targer packet is AKA-Challenge /", "SubType_value", fmt.Sprintf("0x%X", typeData[0]))
@@ -167,7 +152,6 @@ func decodeEapTypeData(typeData []byte) (atResData, atMacData, atCheckcodeData, 
 		slog.Error("[EAP-Server] targer packet is not AKA-Challenge or AKA-Synch-Fail /", "SubType_value", fmt.Sprintf("0x%X", typeData[0]))
 		return nil, nil, nil, nil, fmt.Errorf("invalid subtype found")
 	}
-	// AKA-Challenge/AKA-Synchronization-Failureなら、SubtypeとReservedフィールドを除去してデコード開始する。
 	data = typeData[3:]
 	slog.Debug("[EAP-Server] AT_xxx decoding target /", "data", fmt.Sprintf("0x%X", data))
 	dataLen := len(data)
@@ -175,7 +159,6 @@ func decodeEapTypeData(typeData []byte) (atResData, atMacData, atCheckcodeData, 
 		slog.Error("[EAP-Server] AKA-Challenge/AKA-Synch-Fail from UE/STA decoding error", "length", dataLen)
 		return nil, nil, nil, nil, fmt.Errorf("data length too short")
 	}
-	// Decode用変数を準備
 	var atIdentified byte
 	atResDecoded := false
 	atMacDecoded := false
@@ -192,7 +175,7 @@ func decodeEapTypeData(typeData []byte) (atResData, atMacData, atCheckcodeData, 
 				break
 			}
 			resActualLen := binary.BigEndian.Uint16(data[i+2 : i+4])
-			// RESの実際の長さはbit数で入ってくるが、暫定的に64bit（8byte）が入る想定で処理する。
+			// Lenth of RES is flexible in standard spec, but this part set fixed 64bit temporary.
 			atResData = data[i+4 : i+int(resActualLen/8)+4]
 			slog.Debug("[EAP-Server] AT_RES decoded /", "data", fmt.Sprintf("0x%X", atResData))
 			atResDecoded = true

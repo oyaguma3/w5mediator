@@ -11,10 +11,6 @@ import (
 	"github.com/wmnsk/milenage"
 )
 
-// case 1,11,12 に対応。
-// EAP-Identity受信してIdentityの中身を確認し、n35問い合わせかFullAuth要求かEAP-Failureにする。
-// AKA-Identityを受けたケースでは、AKA-Identityの中身からIdentityを特定する処理に分岐する。
-// 戻り値は、EAP-Message AVPに載せるEAPパケット, EAP-Failure時のReply-Messageとなっている。
 func actionEapIdentity(caseId byte, eapPktFromC *layers.EAP) ([]byte, string, error) {
 	slog.Debug("[EAP-Server] received EAP-Identity or EAP-Response_AKA-Identity /", "process", "start")
 	var eapPktToC []byte
@@ -32,14 +28,13 @@ func actionEapIdentity(caseId byte, eapPktFromC *layers.EAP) ([]byte, string, er
 			replyMsg = "invalid or unsupported identity"
 			return eapPktToC, replyMsg, idChkErr
 		}
-		// akaFlag==18 (EAP-SIM)は未サポートなのでEAP-Failureを返す。
+		// This version doesn't support EAP-SIM and it returns EAP-Failure.
 		if akaFlag == 18 {
 			slog.Error("[EAP Server] EAP-Identity check failed /", "error", "parmanent EAP-SIM identity detected")
 			eapPktToC = []byte{0x04, generateEAPId(), 0x00, 0x04}
 			replyMsg = "EAP-SIM not supported"
 			return eapPktToC, replyMsg, fmt.Errorf("eap-sim not supported")
 		}
-		// FULLAUTH要求ケースに入った時の処理。最終的にAKA-Ideneityを生成して戻り値として返す。
 		if akaFlag == 7 || akaFlag == 8 {
 			var eapType byte
 			switch akaFlag {
@@ -81,19 +76,16 @@ func actionEapIdentity(caseId byte, eapPktFromC *layers.EAP) ([]byte, string, er
 		replyMsg = "EAP-Server process error"
 		return eapPktToC, replyMsg, fmt.Errorf("undefined case")
 	}
-	// Identityに問題がなければ、UDRに鍵情報取得(AuthenticationSubscription)を投げる。
 	ki, opc, sqn, amf, authSubscGetErr := authSubscGet(imsiString, conf.udrAddress, conf.apiVersion, conf.responseBodyType)
 	if authSubscGetErr != nil {
 		slog.Error("[EAP Server] Getting key info failed /", "imsi", imsiString, "error", authSubscGetErr)
 		eapPktToC, replyMsg, err = eapServerFailTemplate()
 		return eapPktToC, replyMsg, err
 	}
-	// Key infoの4つがUDRから取得できたら、string(eapPktFromC.TypeData)をキーとしたsubscInfoを初期化する。
-	// このケースでここまで処理が通っているなら、必然的にeapPktFromC.TypeDataはInner-Identityなので問題ない。
+
 	thisCaseId := string(eapPktFromC.TypeData)
 	updInfo := initializeSubscInfo(thisCaseId)
-	// 初期化後は、更新用SubscInfoで不足しているものを出力していく。
-	// まずはrand生成。
+
 	rnd, rndGenErr := generateRAND()
 	if rndGenErr != nil {
 		slog.Error("[EAP-Server] generating RAND failed /", "error", rndGenErr)
@@ -101,8 +93,7 @@ func actionEapIdentity(caseId byte, eapPktFromC *layers.EAP) ([]byte, string, er
 		deleteSubscInfo(thisCaseId)
 		return eapPktToC, replyMsg, err
 	}
-	// RESとMSKを導出するため、MilenageパッケージのNewWithOPc()とF2345()を使ってRES/CK/IKを導出。
-	// ただし、sqnはuint64で、amfはuint16で引数に取るので前処理が必要。
+
 	sqnByte := make([]byte, 8)
 	_ = copy(sqnByte[2:8], sqn)
 	sqn64 := binary.BigEndian.Uint64(sqnByte)
@@ -115,7 +106,6 @@ func actionEapIdentity(caseId byte, eapPktFromC *layers.EAP) ([]byte, string, er
 		deleteSubscInfo(thisCaseId)
 		return eapPktToC, replyMsg, err
 	}
-	// akaFlagからEAP Type(AKA/AKA')を判別し、akaCalc()またはderiveCKIKPrime()+akaPrimeCalc()を使ってMSK導出
 	var kAut []byte
 	var mskV []byte
 	switch akaFlag {
@@ -140,7 +130,7 @@ func actionEapIdentity(caseId byte, eapPktFromC *layers.EAP) ([]byte, string, er
 		deleteSubscInfo(thisCaseId)
 		return eapPktToC, replyMsg, err
 	}
-	// 更新用SubscInfoに必要な値が全て揃ったので代入し、更新実施。
+
 	updInfo.akaFlag = akaFlag
 	updInfo.ki = ki
 	updInfo.opc = opc
@@ -156,7 +146,6 @@ func actionEapIdentity(caseId byte, eapPktFromC *layers.EAP) ([]byte, string, er
 		deleteSubscInfo(thisCaseId)
 		return eapPktToC, replyMsg, err
 	}
-	// UDRのSQN更新。imsiは、また引数sqnはstring型のため、前処理が必要。
 	sqnStr, sqnIncrErr := sqnIncrement(sqn)
 	if sqnIncrErr != nil {
 		slog.Error("[EAP-Server] SQN increment process failed /", "id", thisCaseId, "error", sqnIncrErr)
@@ -171,7 +160,6 @@ func actionEapIdentity(caseId byte, eapPktFromC *layers.EAP) ([]byte, string, er
 		deleteSubscInfo(thisCaseId)
 		return eapPktToC, replyMsg, err
 	}
-	// encodeEapPacketChallenge()使ってEAPパケット生成。ここでkAutが必要。
 	eapPktToC, unixTimeNow, encodeErr := encodeEapPacketChallenge(updInfo.akaFlag, updInfo.ki, updInfo.opc, updInfo.rand, updInfo.sqn, updInfo.amf, kAut)
 	if encodeErr != nil {
 		slog.Error("[EAP-Server] EAP Packet construction failure /", "error", encodeErr)
@@ -180,7 +168,6 @@ func actionEapIdentity(caseId byte, eapPktFromC *layers.EAP) ([]byte, string, er
 		return eapPktToC, replyMsg, err
 	}
 	slog.Debug("[EAP-Server] EAP packet construction success /", "eapId", fmt.Sprintf("0x%X", eapPktToC[1]))
-	// 戻り値のEAPパケットからeapIdを参照し、encodeEapPacketChallenge()の戻り値timeStampとidentityをセットでEAP ID Tableに登録
 	eapIdStoreErr := eapIdTableStore(eapPktToC[1], thisCaseId, unixTimeNow)
 	if eapIdStoreErr != nil {
 		slog.Error("[EAP-Server] EAP-ID Table store failed /", "id", thisCaseId, "error", eapIdStoreErr)
@@ -191,15 +178,11 @@ func actionEapIdentity(caseId byte, eapPktFromC *layers.EAP) ([]byte, string, er
 	return eapPktToC, replyMsg, err
 }
 
-// case 13、14 に対応。
-// AT_RES/AT_MACが入っているであろうAKA-Challengeから、EAP-Sucess/Failureを判定する。
 func actionEapRespAkaChallenge(caseId byte, eapPktFromC *layers.EAP) ([]byte, string, error) {
 	slog.Debug("[EAP-Server] Authentication vector verification start /", "caseId", fmt.Sprintf("0x%X", caseId))
 	var eapPktToC []byte
 	var replyMsg string = "null"
 	var err error
-	// 引数のEAPパケットポインタからBaseLayer.ContentsとBaseLayer.payloadを抽出してくっつける（eapPktAllになる）
-	// 続けてeapPktFromC.TypeDataを使って、AT_RESとAT_MACのデータ部分を取得する。
 	eapPktAll := []byte(string(eapPktFromC.BaseLayer.Contents) + string(eapPktFromC.BaseLayer.Payload))
 	atResData, atMacData, _, _, decodeErr := decodeEapTypeData(eapPktFromC.TypeData)
 	if decodeErr != nil {
@@ -207,22 +190,19 @@ func actionEapRespAkaChallenge(caseId byte, eapPktFromC *layers.EAP) ([]byte, st
 		eapPktToC, replyMsg, err = eapServerFailTemplate()
 		return eapPktToC, replyMsg, err
 	}
-	// ここからAT_RES一致チェック処理。
-	// 引数のEAPパケットからeapIdを取得し、identityをロード。
 	identity, _, loadErr := eapIdTableLoad(eapPktFromC.Id)
 	if loadErr != nil {
 		slog.Error("[EAP Server] identity bound with EAP-ID loading failure /", "error", loadErr)
 		eapPktToC, replyMsg, err = eapServerFailTemplate()
 		return eapPktToC, replyMsg, err
 	}
-	// ロードしたidentityからさらに各種鍵情報をロード
 	info, exist := loadSubscInfo(identity)
 	if !exist {
 		slog.Error("[EAP Server] AV verification process failed / no user information /", "identity", identity)
 		eapPktToC, replyMsg, err = eapServerFailTemplate()
 		return eapPktToC, replyMsg, err
 	}
-	// milenage関連計算。SQNとAMFはmilenageパッケージ向けに若干の型変換を施す。
+
 	sqnByte := make([]byte, 8)
 	_ = copy(sqnByte[2:8], info.sqn)
 	sqn64 := binary.BigEndian.Uint64(sqnByte)
@@ -235,8 +215,6 @@ func actionEapRespAkaChallenge(caseId byte, eapPktFromC *layers.EAP) ([]byte, st
 		deleteSubscInfo(identity)
 		return eapPktToC, replyMsg, err
 	}
-	// RESが出てくるのでAT_RESデータ部分と一致するかチェック。ただしbyteスライス同士なのでstringに型変換して比較する。
-	// 一致していれば次のチェック処理に移行。
 	if !(string(xres) == string(atResData)) {
 		slog.Warn("[EAP-Server] XRES/RES not matched /", "id", identity)
 		slog.Debug("[EAP-Server] XRES/RES not matched /", "XRES", fmt.Sprintf("0x%X", xres), "AT_RES_data", fmt.Sprintf("0x%X", atResData))
@@ -245,13 +223,9 @@ func actionEapRespAkaChallenge(caseId byte, eapPktFromC *layers.EAP) ([]byte, st
 		err = fmt.Errorf("authentication vector unmatched")
 		return eapPktToC, replyMsg, err
 	}
-	// ここからAT_MACチェック処理。
-	// eapPktAllからAT_MACデータ部分と一致するbyte列のインデックスを検索。
+
 	index := strings.Index(string(eapPktAll), string(atMacData))
-	// 比較用AT_MAC算出のため、eapPktAllのAT_MACデータ部分を0で上書きする。
 	_ = copy(eapPktAll[index:index+16], make([]byte, 16))
-	// AT_RESチェック時にロードした鍵情報を使って、0上書きしたeapPktAllでAT_MACを算出する。
-	// ただし、EAP-AKAとEAP-AKA'で算出処理が異なるので、ロードした鍵情報のakaFlagを使ってケース分割する。
 	var xMac []byte
 	switch info.akaFlag {
 	case 23:
@@ -272,8 +246,6 @@ func actionEapRespAkaChallenge(caseId byte, eapPktFromC *layers.EAP) ([]byte, st
 		deleteSubscInfo(identity)
 		return eapPktToC, replyMsg, err
 	}
-	// AT_MACデータ部分とexpected MACを比較する。
-	// ここもbyteスライス同士なのでstringに型変換して比較する。
 	if !(string(atMacData) == string(xMac)) {
 		slog.Error("[EAP-Server] invalid AT_MAC /", "id", identity)
 		slog.Debug("[EAP-Server] invalid AT_MAC /", "expectedMAC", fmt.Sprintf("0x%X", xMac), "AT_MAC_data", fmt.Sprintf("0x%X", atMacData))
@@ -282,21 +254,16 @@ func actionEapRespAkaChallenge(caseId byte, eapPktFromC *layers.EAP) ([]byte, st
 		err = fmt.Errorf("invalid at_mac")
 		return eapPktToC, replyMsg, err
 	}
-	// ここまで来たら認証OK判定となるので、EAP-Successパケットを生成。
 	eapPktToC = []byte{0x03, generateEAPId(), 0x00, 0x04}
 	slog.Info("[EAP-Server] Authentication success /", "id", identity)
 	return eapPktToC, replyMsg, nil
 }
 
-// case 17、18 に対応。
-// AT_AUTSが入っているであろうReSynchに対する、再度のAKA-Challengeを生成する。
 func actionEapRespAkaReSynch(caseId byte, eapPktFromC *layers.EAP) ([]byte, string, error) {
 	slog.Debug("[EAP-Server] Re-synchronization needed /", "process", "start", "caseId", fmt.Sprintf("0x%X", caseId))
 	var eapPktToC []byte
 	var replyMsg string = "null"
 	var err error
-	// 引数のEAPパケットポインタからBaseLayer.ContentsとBaseLayer.payloadを抽出してくっつける（eapPktAllになる）
-	// 続けてeapPktFromC.TypeDataを使ってAT_AUTSのデータ部分を取得し、conc(SQNms)を取得する。
 	_, _, _, atAutsData, decodeErr := decodeEapTypeData(eapPktFromC.TypeData)
 	if decodeErr != nil {
 		slog.Error("[EAP Server] EAP packet decoding failure /", "error", decodeErr)
@@ -304,22 +271,20 @@ func actionEapRespAkaReSynch(caseId byte, eapPktFromC *layers.EAP) ([]byte, stri
 		return eapPktToC, replyMsg, err
 	}
 	concSQNms := atAutsData[0:6]
-	// SQNhe/F5*/MAC-S導出のため、まずはEAP-IDからidentityをロード。
+
 	identity, _, loadErr := eapIdTableLoad(eapPktFromC.Id)
 	if loadErr != nil {
 		slog.Error("[EAP Server] identity bound with EAP-ID loading failure /", "error", loadErr)
 		eapPktToC, replyMsg, err = eapServerFailTemplate()
 		return eapPktToC, replyMsg, err
 	}
-	// ロードしたidentityからさらに各種鍵情報をロード
 	info, exist := loadSubscInfo(identity)
 	if !exist {
 		slog.Error("[EAP Server] AV verification process failed /", "error", "no user information", "identity", identity)
 		eapPktToC, replyMsg, err = eapServerFailTemplate()
 		return eapPktToC, replyMsg, err
 	}
-	// milenage関連計算。SQNとAMFはmilenageパッケージ向けに若干の型変換を施す。
-	// milenageパッケージのComputeAll()で一旦全て算出しておく。
+
 	sqnByte := make([]byte, 8)
 	_ = copy(sqnByte[2:8], info.sqn)
 	sqn64 := binary.BigEndian.Uint64(sqnByte)
@@ -332,10 +297,8 @@ func actionEapRespAkaReSynch(caseId byte, eapPktFromC *layers.EAP) ([]byte, stri
 		deleteSubscInfo(identity)
 		return eapPktToC, replyMsg, err
 	}
-	// F5*算出されたので conc(SQNms) xor F5* を実行してSQNmsを導出する。
+
 	sqnMS := xor(concSQNms, mil.AKS)
-	// SQNmsとAMF:0000で再びComputeAllを実行し、続けてGenerateAUTSでこちら側のAUTSを導出。
-	// 一致していればResynch処理続行、不一致ならAUTS unmatchedのエラー吐いてEAP-Failure形成。
 	sqnByte = make([]byte, 8)
 	amfZero := make([]byte, 2)
 	_ = copy(sqnByte[2:8], sqnMS)
@@ -364,8 +327,6 @@ func actionEapRespAkaReSynch(caseId byte, eapPktFromC *layers.EAP) ([]byte, stri
 		err = fmt.Errorf("auts unmathed")
 		return eapPktToC, replyMsg, err
 	}
-	// AUTS一致ならSQNms確定なので、SQNmsを1インクリメントして新しいSQNmsとする。
-	// sqnIncrement()を再利用するが、戻り値がstring(12桁hex)なのでhex.DecodeString()でbyte列に戻す必要がある。
 	sqnMSstr, incrErr := sqnIncrement(sqnMS)
 	if incrErr != nil {
 		slog.Error("[EAP-Server] SQN increment for Resynch failed /", "error", incrErr)
@@ -382,14 +343,11 @@ func actionEapRespAkaReSynch(caseId byte, eapPktFromC *layers.EAP) ([]byte, stri
 	}
 	slog.Debug("[EAP-Server] SQN(UDR) update for Resynch /", "before", fmt.Sprintf("0x%X", sqnMS), "after", fmt.Sprintf("0x%X", sqnMSnew))
 	sqnMS = sqnMSnew
-	// SQNインクリメントが完了したので、改めてUDRにSQN更新を投げる。
-	// ここで一時的にSQN更新に失敗しても、次に同じユーザが認証を試みたら再度Re-Synchに入って救われることを想定して、Failを返さないでおく。
 	sqnMsUpdErr := sqnUdrUpdate(identity[1:16], conf.udrAddress, conf.apiVersion, hex.EncodeToString(sqnMS))
 	if sqnMsUpdErr != nil {
 		slog.Error("[EAP-Server] SQN(UDR) update for Re-Synch failed /", "error", sqnMsUpdErr)
 	}
-	// 続けて、新しいSQNを使って新しい認証情報を導出する。
-	// randは再生成するが、kiやOPcは関数の初期段階でロードした情報をそのまま利用できる。
+
 	newRAND, genRndErr := generateRAND()
 	if genRndErr != nil {
 		slog.Error("[EAP-Server] new RAND generation failed /", "error", genRndErr)
@@ -409,8 +367,7 @@ func actionEapRespAkaReSynch(caseId byte, eapPktFromC *layers.EAP) ([]byte, stri
 		deleteSubscInfo(identity)
 		return eapPktToC, replyMsg, err
 	}
-	// AKA-Challenge用パケット生成に使うK_autはakaとakapで処理が異なるので、info.akaFlagを使ってケース分ける。
-	// MSKもこの段階で導出して、後でSubscInfo更新に載せる。
+
 	var kAut []byte
 	var msk []byte
 	switch info.akaFlag {
@@ -432,7 +389,6 @@ func actionEapRespAkaReSynch(caseId byte, eapPktFromC *layers.EAP) ([]byte, stri
 		deleteSubscInfo(identity)
 		return eapPktToC, replyMsg, err
 	}
-	// K_autが導出されたので、AKA-Challengeを生成。
 	eapPktToCreSynch, timeStamp, resyncPktErr := encodeEapPacketChallenge(info.akaFlag, info.ki, info.opc, newRAND, sqnMS, info.amf, kAut)
 	if resyncPktErr != nil {
 		slog.Error("[EAP-Server] EAP Packet construction for ReSynch is failed /", "error", resyncPktErr)
@@ -441,8 +397,6 @@ func actionEapRespAkaReSynch(caseId byte, eapPktFromC *layers.EAP) ([]byte, stri
 		return eapPktToC, replyMsg, err
 	}
 	slog.Debug("[EAP-Server] EAP packet construction for Resynch success /", "eapId", fmt.Sprintf("0x%X", eapPktToCreSynch[1]))
-	// timeStamp返ってくるので、EAP-ID Tableに再登録する
-	// さらに、再計算したSubscInfo系も更新する。
 	eapIdStoreErr := eapIdTableStore(eapPktToCreSynch[1], identity, timeStamp)
 	if eapIdStoreErr != nil {
 		slog.Error("[EAP-Server] EAP-ID Table store failed /", "id", identity, "error", eapIdStoreErr)
@@ -461,13 +415,10 @@ func actionEapRespAkaReSynch(caseId byte, eapPktFromC *layers.EAP) ([]byte, stri
 		deleteSubscInfo(identity)
 		return eapPktToC, replyMsg, err
 	}
-	// ここまで来たら、後は完成パケットを返すのみ。
 	eapPktToC = eapPktToCreSynch
 	return eapPktToC, replyMsg, nil
 }
 
-// case 15、16、19、20 に対応。
-// EAP-Failureを返す。
 func actionEapFail(caseId byte) ([]byte, string) {
 	slog.Debug("[EAP-Server] EAP-Failure due to error/reject in UE/STA side /", "caseId", fmt.Sprintf("0x%X", caseId))
 	var reply string = "null"
@@ -488,8 +439,6 @@ func actionEapFail(caseId byte) ([]byte, string) {
 	return eapFailurePacket, reply
 }
 
-// case 0、253、254、255 に対応。
-// EAP-FailureなしのAccess-Rejectケースに対するReply-Messageを返す。
 func actionDirectReject(caseId byte) string {
 	slog.Debug("[EAP-Server] EAP-Failure due to invalid parameter /", "caseId", fmt.Sprintf("0x%X", caseId))
 	var reply string = "null"
@@ -506,7 +455,6 @@ func actionDirectReject(caseId byte) string {
 	return reply
 }
 
-// エラーハンドリングの結果、後続処理に進めずEAP-Failureを返す場合の定形処理。
 func eapServerFailTemplate() ([]byte, string, error) {
 	eapPktToC := []byte{0x04, generateEAPId(), 0x00, 0x04}
 	replyMsg := "EAP-Server failure"
@@ -514,8 +462,6 @@ func eapServerFailTemplate() ([]byte, string, error) {
 	return eapPktToC, replyMsg, err
 }
 
-// Byteスライスを一括でxorするための関数。
-// milenageパッケージから一部流用。
 func xor(b1, b2 []byte) []byte {
 	var l int
 	if len(b1)-len(b2) < 0 {

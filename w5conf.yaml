@@ -1,16 +1,18 @@
-# ■このファイルについて
-# WLAN-5GC Mediatorの各種設定を記載したもので、起動時に読み込まれます。
-# ファイル名は w5conf.yaml から変更しないようお願いします。
+# ----------------------------------------
+# Regarding "w5conf.yaml"
+# ----------------------------------------
+# It is configuration of w5mediator(WLAN-5GC Mediator), and read when activated.
+# DO NOT CHANGE this file name, keep "w5conf.yaml".
 
 # ----------------------------------------
-# ログファイル出力に関する設定です。
+# Log file configuration
 # ----------------------------------------
-# ログファイルは実行ファイルと同じ場所に生成されます。
-# Filenameでは、生成するログファイルの名前を指定します。
-# MaxSizeはログファイル１つの最大サイズで、単位はMBです。
-# MaxBackupsは過去ログの保管数で、切り出されてからMaxAge（日数）経過すると削除されます。
-# LocalTimeはタイムスタンプにローカル時間を使うかどうか(true/false)の設定です。
-# Compressは過去ログをgzipで圧縮するかどうか(true/false)の設定です。
+# Log files are generated at same folder of executable file.
+# "filename" sets file name of generated log files.
+# "maxSize" is max size of log file.(MB unit)
+# "maxBackups" is number of archive log, and it deletes after "maxAge" days from cut-out.
+# "localTime" set local time in time stamp or not. (true or false)
+# "compress" set compressing archive logs by gzip or raw text. (true or false)
 filename: w5main.log
 maxSize: 100
 maxBackups: 2
@@ -19,57 +21,60 @@ localTime: true
 compress: false
 
 # ----------------------------------------
-# ログ出力レベルに関する設定です。
+# Log level configuration
 # ----------------------------------------
-# ログ出力レベルは Error(1) / Warn(2) / Info(3) / Debug(4) の4段階があり、右に行くほど詳細になります。
-# 設定値は整数で記載してください。
-# レベルをDebug(4)に設定した場合、SIM鍵情報(Ki/OPc)など機微情報をログ出力するかどうかをsensitiveInfoで設定可能です。
-# sensitiveInfoをtrueに設定すると、一部の処理で機微情報がログ上に出力されます。
+# "loglevel" define details about log outputs.
+# Level can set 1 to 4, as Error(1) / Warn(2) / Info(3) / Debug(4).
+# If it sets Debug(4), sensitive information like key related with SIM reveal on log files as default.
+# You can set "false" in "sensitiveInfo" if no output for sensitive information.(it needs to restart w5mediator) 
 logLevel: 4
 sensitiveInfo: true
 
 # ----------------------------------------
-# Radiusサーバとしての設定です。
+# Radius IF configuration
 # ----------------------------------------
-# sharedSecretには、Radiusサーバとして使用する共有秘密鍵を設定します。
-# AllowedClientAddressには、Radiusメッセージを許容するIPアドレスを設定します。ポート番号は設定できません。
-# また現バージョンでは、上記2項目は1つのみ設定可能です。
-sharedSecret: simauthgateway
+# "sharedSecret" is Shared Secret for Radius.
+# "allowedClientAddress" is IP address of Radius client, but it cannot set port number.
+# And in ver.1.0, it can set one combination only.
+sharedSecret: hogehoge
 allowedClientAddress: 192.168.8.1
-# userNameAdditionは、EAP-Success時にUser-Name属性を付与するかどうかの設定項目です。
-# trueに設定した場合、Full-Auth時のOuter-Identity(user@realm)をAccess-Acceptで送り返します。
+# "userNameAddition" is whether w5mediator add User-Name attribute when EAP-Success.
+# If it is "true", w5mediator sets User-Name attribute in Access-Accept.
+# Outer-Identity(user@realm) is set in User-Name.
 userNameAddition: true
 
 # ----------------------------------------
-# EAP-AKA'関連設定です。
+# EAP-AKA' related configuration
 # ----------------------------------------
-# EAP-AKA'認証のKey Derivationに用いるNetwork Nameを設定します。通常では"WLAN"を設定してください。
-# atKDFInputは、Access-Challenge/EAP-Response/AKA-Challengeに含まれるAT_KDF_INPUTの値を指定します。
-# 通常ではnwNameForKDFと同じ値を指定します。
+# "nwNameForKDF" is Network Name for key derivation in EAP-AKA' Authentication process.
+# Generally, it sets "WLAN".
+# "atKDFInput" is value of AT_KDF_INPUT included in Access-Challenge/EAP-Response/AKA-Challenge.
+# Generally, it sets same value of "nwNameForKDF".
 nwNameForKDF: WLAN
 atKDFInput: WLAN
 
 # ----------------------------------------
-# 5GC SBI HTTP API関連設定です。
+# 5GC SBI HTTP API related configuration
 # ----------------------------------------
-# udrAddressには、接続している5GCのUDRアドレスを "[IPアドレス]:[ポート番号]" の形式で設定してください。
-# N35インターフェースで送信するauthentication-subscriptionのAPI rootとして使用されます。
-# （なお、現バージョンではTLSやOAuth2.0には非対応です）
-udrAddress: 127.0.0.4:8000
-# apiVersionは、authentication-subscription送信時のURIに含まれるAPIバージョンを指定します。
-# 3GPP標準ではv2ですが、free5GCではv1が使われているため、対向5GCによって設定を変更する必要があります。
-# v1またはv2を設定してください。
+# "udrAddress" is IP Address for 5GC UDR, as format "[IP address]:[port number]".
+# It is used for API root in authentication-subscription of N35 IF.
+# (Note: TLS and OAuth2.0 are not supported in ver.1.0)
+udrAddress: 192.168.56.101:8000
+# "apiVersion" is API version included in sending URI of authentication-subscription.
+# "v1" or "v2" should be set.
+# (Note: 3GPP spec R16 defines using "v2", but free5GC v3.4.1 uses "v1".)
 apiVersion: v1
-# UDRへのauthentication-subscriptionに対して返るResponseのデコード形式を指定します。
-# 現バージョンでは 1 のみ利用可能です（1はfree5GC v3.4.1以前の形式を示しています）
+# "responseBodyType" is decoding template for response body of authentication-subscription from UDR.
+# In ver.1.0, parameter "1" only use.
 responseBodyType: 1
 
 # ----------------------------------------
-# PLMN関連設定です。
+# 5GC PLMN related configuration
 # ----------------------------------------
-# 5GCへの問い合わせを許容するPLMNを設定します。
-# PLMNは[mcc]-[mnc]で表記し、複数設定する場合は","で区切ります。2桁mncの場合でも0パディング不要です。
-# PLMN:44003であれば "440-03" と表記し、PLMN:999002であれば "999-002" と表記します。
+# "allowedPLMN" defines list of user PLMN allowed. It is white list.
+# PLMN is set as [mcc]-[mnc]. In case of multiple PLMN, it is divided by ","(comma).
+# If using PLMN with 2 digit MNC, no needs zero padding at 3 digit in MNC.
+# For example, PLMN:44003 is described as "440-03", PLMN:999002 is decribed as "999-002".
 allowedPLMN: 999-002,440-03
 
 # end of file.

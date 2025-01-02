@@ -28,7 +28,7 @@ type eapIdBinded struct {
 }
 
 /*
-【subscInfo】
+- subscInfo -
 	[key]
 		identity string (cf. 0999002012345678@wlan.mnc002.mcc999.3gppnetwork.org)
 	[value]
@@ -41,7 +41,7 @@ type eapIdBinded struct {
 			RAND         16 byte
 			RES           8 byte
 			MSK          64 byte
-【eapIdTable】
+- eapIdTable -
 	[key]
 		eapId byte
 	[value]
@@ -49,9 +49,6 @@ type eapIdBinded struct {
 		timeStamp int64 (UNIXTIME)
 */
 
-// idをキーとするSubscInfoを初期化する関数。
-// SubscInfoを更新するsetXXX系関数は最初に元の値をLoadするので、setXXX系関数を使う前に初期化しておく必要がある。
-// 初期化されたsubscdata構造体を返すが、不要ならアンダースコアで戻り値を潰しておく。
 func initializeSubscInfo(id string) subscdata {
 	var init subscdata
 	init.akaFlag = 0x00
@@ -95,10 +92,8 @@ func deleteSubscInfo(id string) {
 	}
 }
 
-// ----------SubscInfo各要素の更新を行う関数群----------
+// ---------- Functions for refresh/update elements of SubscInfo ----------
 
-// 全てのsubscInfoを一挙に更新する。引数のallInfoには全て更新後の値を代入しておくこと。
-// （でなければ初期化時の00パディングが入ったままになる）
 func setAllSubscInfo(id string, allInfo subscdata) error {
 	slog.Debug("[SubscInfo] UPDATE / all subscInfo /", "process", "start", "id", id)
 	subscInfoAll, chk := loadSubscInfo(id)
@@ -120,9 +115,7 @@ func setAllSubscInfo(id string, allInfo subscdata) error {
 	} else {
 		slog.Debug("[SubscInfo] UPDATE : Key Info / old value exist but not logged (sensitive info)", "id", id)
 	}
-	// 古い値を一通りログ出力したので値を更新。
 	subscInfo.Store(id, allInfo)
-	// 更新したので新しい値をログ出力。
 	if conf.sensitiveInfo {
 		slog.Debug("[SubscInfo] UPDATE / AKA Flag /", "new", fmt.Sprintf("0x%X", allInfo.akaFlag))
 		slog.Debug("[SubscInfo] UPDATE / Ideneity /", "new", id)
@@ -140,9 +133,6 @@ func setAllSubscInfo(id string, allInfo subscdata) error {
 	return nil
 }
 
-//----------ここからeapIdTable関連----------
-
-// EAP-ID生成
 func generateEAPId() byte {
 	var generatedId byte
 	for {
@@ -159,7 +149,6 @@ func generateEAPId() byte {
 	return generatedId
 }
 
-// eapIdTableから読み出し
 func eapIdTableLoad(k byte) (string, int64, error) {
 	var valueStr string
 	var valueTime int64
@@ -182,7 +171,6 @@ func eapIdTableLoad(k byte) (string, int64, error) {
 	return valueStr, valueTime, err
 }
 
-// eapIdTableへ書き込み
 func eapIdTableStore(k byte, vi string, vt int64) error {
 	var v eapIdBinded
 	var err error
@@ -205,7 +193,6 @@ func eapIdTableStore(k byte, vi string, vt int64) error {
 	return err
 }
 
-// eapIdTableからkey-Valueペア削除
 func eapIdTableDelete(k byte) {
 	_, ok := eapIdTable.LoadAndDelete(k)
 	if ok {
@@ -215,10 +202,8 @@ func eapIdTableDelete(k byte) {
 	}
 }
 
-// eapIdTableの残置データ監視＆削除
-// 20秒ごとにEAP-ID Tableの全IDを走査し、IDが存在していて現在時刻より10秒以上経過しているものをチェック。
-// 該当するIDと、これに紐づくSubscInfoを削除する（端末からResponse返らず10秒以上浮いてしまったデータの消去）
-// WLAN-5GC GW起動後にgoroutineで起動させる想定。
+// Purpose of this function is watch/deletion garbage EAP-ID of eapIdTable.
+// (if No EAP response return from client/UE, garbage EAP-ID remains eapIdTable.)
 func garbageIdCleaner() {
 	for {
 		slog.Debug("[EAP-ID] periodic garbage ID cleaning...", "interval", "20sec")

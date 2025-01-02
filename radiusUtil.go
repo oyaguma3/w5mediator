@@ -31,7 +31,6 @@ const (
 	case255 = "invalid or unsupported EAP subtype"
 )
 
-// 受信したRadiusパケットのSourceアドレスが、設定した許容IPアドレスと一致しているか確認する。
 func isSrcAddrValid(remoteAddr string) bool {
 	var result bool
 	chkAddr, _, _ := strings.Cut(remoteAddr, ":")
@@ -44,9 +43,6 @@ func isSrcAddrValid(remoteAddr string) bool {
 	return result
 }
 
-// Proxy-StateやEAP-Messageなど、同一Typeに複数のAttributeが存在する場合のAttritube抽出を行う。
-// 引数に対象Radiusパケットとradius.Type型（実利用時はintをそのまま入れる)を指定する。
-// 指定したTypeが存在しない場合、nilとfalseが返る。存在すれば、map型で値が戻ってtrueが入る。
 func multiAttrGet(rp *radius.Packet, t radius.Type) (map[int][]byte, bool) {
 	attrSet := map[int][]byte{}
 	var isExist bool
@@ -64,10 +60,6 @@ func multiAttrGet(rp *radius.Packet, t radius.Type) (map[int][]byte, bool) {
 	return attrSet, isExist
 }
 
-// 引数のRADIUSパケットからMessage-Authenticatorを算出する。Message-Authenticatorが含まれていなければエラーとなる。
-// 戻り値は「期待するMessage-AuthenticatorのByteスライス」である。
-// なお、Responseパケットに適切なMessage-Authenticatorを追加するための算出で使うには、引数に取るResponseパケットに
-// あらかじめresponsePacket.Attributes.Add(80, msgAuthOverwriteZero)等でAttributeを追加しておく必要があることに注意。
 func messageAuthenticatorCalc(rp *radius.Packet, sharedSecret string) ([]byte, error) {
 	slog.Debug("[radutl] Message-Authenticator AVP calculation", "process", "start")
 	expectedMAC := []byte{}
@@ -92,8 +84,6 @@ func messageAuthenticatorCalc(rp *radius.Packet, sharedSecret string) ([]byte, e
 	return expectedMAC, nil
 }
 
-// Message-Authenticatorを算出してチェックする。計算したいRadiusパケット（のポインタ）とShared Secretを引数に取る。
-// チェックOKであればerr=nilで返し、NGならerrに何らかのエラーを入れて返す。
 func messageAuthenticatorCheck(rp *radius.Packet, sharedSecret string) error {
 	slog.Debug("[radutl] Message-Authenticator AVP check", "process", "start")
 	var err error
@@ -126,8 +116,6 @@ func messageAuthenticatorCheck(rp *radius.Packet, sharedSecret string) error {
 	return nil
 }
 
-// radiusパケットからEAP-Message有無を確認し、あればeapPacketSourceにデコード結果（のlayers.EAP構造体）を返す。
-// なお、この関数にはEAP-Messageがある場合のMessage-Authenticatorチェック処理も含まれている。
 func isEAPMessageIncluded(r *radius.Request) (*layers.EAP, bool, error) {
 	slog.Debug("[radutl] EAP-Message AVP existence check", "process", "start")
 	eapPktSrc := new(layers.EAP)
@@ -166,7 +154,6 @@ func isEAPMessageIncluded(r *radius.Request) (*layers.EAP, bool, error) {
 	return eapPktSrc, included, nil
 }
 
-// 受信したRADIUSパケットに含まれるEAP-Message AVPから、どの処理ケースに該当するかを識別する。
 func reqCaseCategorize(ep *layers.EAP) uint8 {
 	slog.Debug("[radutl] case categorize /", "process", "start")
 	var caseNumber uint8
@@ -237,10 +224,6 @@ func reqCaseCategorize(ep *layers.EAP) uint8 {
 	return caseNumber
 }
 
-// EAP-IdentityやAKA-Identityで受領したuser@realmのバリデーションチェック用関数。
-// realm部分は、設定ファイルで指定したPLMNに対するチェックも実施している。
-// user部分はaka/aka'判別も実施しており、戻り値1でEAP Type(23か50)を返すようにしている。
-// 戻り値2はIMSIを返すが、この関数実行後にUDR問い合わせる想定なのでstringで返している。
 func identityValidationCheck(id []byte, plmnList string) (byte, string, error) {
 	slog.Debug("[radutl] identity validation check /", "process", "start", "identity", fmt.Sprintf("%v", string(id)))
 	var akaFlag byte = 0
@@ -269,7 +252,6 @@ func identityValidationCheck(id []byte, plmnList string) (byte, string, error) {
 	return akaFlag, imsi, chkErr
 }
 
-// Identityチェックのうち、user部分のバリデーションチェックを行う関数。
 func userValidationCheck(formerPart string) (byte, string, error) {
 	slog.Debug("[radutl] identity for user part validation check /", "process", "start", "userPart", formerPart)
 	var eapType byte
@@ -308,8 +290,6 @@ func userValidationCheck(formerPart string) (byte, string, error) {
 	return eapType, imsi, userChk
 }
 
-// Identityチェックのうち、realm部分のバリデーションチェックを行う関数。
-// 有効ならtrue、無効ならfalseを返す。
 func realmValidationCheck(latterPart, list string) bool {
 	slog.Debug("[radutl] identity for realm part validation check /", "process", "start", "realmPart", latterPart)
 	var realmChk bool
@@ -333,7 +313,8 @@ func realmValidationCheck(latterPart, list string) bool {
 		return realmChk
 	}
 	mcc := latterPartElement[2][3:6]
-	// ver.1時点ではハードコーディングしているが、将来的にはw5confから取得させる。
+	// It is identification for MCC with 3digits MNC. (cf. 441-000, 999-002 in Japan, 310-110 in America)
+	// Special MCCs are hard-coded in ver.1.0. But in future, it will get w5conf.yaml.
 	specialMCCList := []string{"441", "999", "310"}
 	listLen := len(specialMCCList)
 	threeDigitMNC := false

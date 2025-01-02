@@ -12,12 +12,6 @@ import (
 	"github.com/go-magma/magma/modules/feg/gateway/services/eap/providers/aka"
 )
 
-/*
-EAP-AKA/AKA'の各種認証情報を導出する機能のコード群
-magmaプロジェクトのeapパッケージはここにインポートする
-ここの関数を使う前に、MilenageパッケージでIK/CK導出を忘れずに。
-*/
-
 func generateRAND() ([]byte, error) {
 	r := make([]byte, 16)
 	_, err := rand.Read(r)
@@ -28,8 +22,7 @@ func generateRAND() ([]byte, error) {
 	return r, err
 }
 
-// magmaプロジェクトのEAP-AKA関連コードを使って計算。
-// 引数のidentityはEAP-Identityなどに入っていたInner-identityそのままを入れる。
+// Argument "identity" use Inner-identity from EAP-Identity.
 func akaCalc(identity, IK, CK []byte) (K_encr, K_aut, MSK, EMSK []byte) {
 	K_encr, K_aut, MSK, EMSK = aka.MakeAKAKeys(identity, IK, CK)
 	if conf.sensitiveInfo {
@@ -41,8 +34,7 @@ func akaCalc(identity, IK, CK []byte) (K_encr, K_aut, MSK, EMSK []byte) {
 	return K_encr, K_aut, MSK, EMSK
 }
 
-// CK'/IK'からMK（MasterKey）を導出し、各エレメントに分割する。
-// ここもfree5GCのソースコードをほぼ流用した。
+// MK(MasterKey) is derived from CK'/IK' and identity, and then key elements are derived from MK.
 func akaPrimeCalc(ikPrime, ckPrime []byte, identity string) ([]byte, []byte, []byte, []byte, []byte, error) {
 	keyAp := string(ikPrime) + string(ckPrime)
 	key := []byte(keyAp)
@@ -63,7 +55,6 @@ func akaPrimeCalc(ikPrime, ckPrime []byte, identity string) ([]byte, []byte, []b
 		MK = append(MK, sha...)
 		prev = sha
 	}
-	// MKが導出されたので、各鍵エレメントに分割する。
 	K_encr := MK[0:16]  // 0..127
 	K_aut := MK[16:48]  // 128..383
 	K_re := MK[48:80]   // 384..639
@@ -79,8 +70,8 @@ func akaPrimeCalc(ikPrime, ckPrime []byte, identity string) ([]byte, []byte, []b
 	return K_encr, K_aut, K_re, MSK, EMSK, nil
 }
 
-// CK'/IK'を導出する。free5GCのソースコードをほぼ流用した。
-// nwNameは conf.nwNameForKDF を入れることを想定している。
+// This function derives CK'/IK' from CK, IK, SQN, AK and NetworkName.
+// Argument "nwName" use "conf.nwNameForKDF" in w5conf.yaml.
 func deriveCKIKPrime(ck, ik, sqn, ak []byte, nwName string) (ckPrime, ikPrime []byte) {
 	sqnXorAK := make([]byte, 6)
 	for i := 0; i < len(sqn); i++ {
