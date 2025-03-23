@@ -240,7 +240,7 @@ func sqnIncrement(sqn []byte) (string, error) {
 		return "", chgUintErr
 	}
 	slog.Debug("SQN increment process", "before", fmt.Sprintf("%012v", updateSqnNum))
-	updateSqnNum++
+	updateSqnNum = updateSqnNum + 32
 	slog.Debug("SQN increment process", "after ", fmt.Sprintf("%012v", updateSqnNum))
 
 	sqnBytesOct := make([]byte, 8)
