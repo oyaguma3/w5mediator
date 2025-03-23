@@ -55,7 +55,7 @@ Please set `EAP-AKA'` in authentication type when you register SIM key informati
 
 ## Development plan
 The items at the top have higher priority.
- - Improvement: SQN increment in sync-fail
+ - ~~Improvement: SQN increment in sync-fail~~ 2025/03/23 fixed.
  - Support: Status-Server (Radius)
  - Support: Accounting (Radius message only)
  - Support: OAuth 2.0
